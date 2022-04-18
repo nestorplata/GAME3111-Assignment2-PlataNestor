@@ -6,6 +6,7 @@
 #include "../../Common/MathHelper.h"
 #include "../../Common/UploadBuffer.h"
 #include "../../Common/GeometryGenerator.h"
+#include "../../Common/Camera.h"
 #include "FrameResource.h"
 #include "Waves.h"
 
@@ -23,6 +24,7 @@ const int gNumFrameResources = 3;
 struct RenderItem
 {
 	RenderItem() = default;
+	RenderItem(const RenderItem& rhs) = delete;
 
     // World matrix of the shape that describes the object's local space
     // relative to the world space, which defines the position, orientation,
@@ -81,7 +83,7 @@ private:
     virtual void OnMouseMove(WPARAM btnState, int x, int y)override;
 
     void OnKeyboardInput(const GameTimer& gt);
-	void UpdateCamera(const GameTimer& gt);
+	//void UpdateCamera(const GameTimer& gt);
 	void AnimateMaterials(const GameTimer& gt);
 	void UpdateObjectCBs(const GameTimer& gt);
 	void UpdateMaterialCBs(const GameTimer& gt);
@@ -96,6 +98,7 @@ private:
     void BuildLandGeometry();
     void BuildWavesGeometry();
 	void BuildBoxGeometry();
+	void BuildGrassWallGeometry();
 	void BuildWedgeGeometry();
 	void BuildSphereGeometry();
 	void BuildCylinderGeometry();
@@ -151,14 +154,7 @@ private:
 
     PassConstants mMainPassCB;
 
-	XMFLOAT3 mEyePos = { 0.0f, 0.0f, 0.0f };
-	XMFLOAT4X4 mView = MathHelper::Identity4x4();
-	XMFLOAT4X4 mProj = MathHelper::Identity4x4();
-
-    float mTheta = 1.5f*XM_PI;
-    float mPhi = XM_PIDIV2 - 0.1f;
-    float mRadius = 50.0f;
-
+	Camera mCamera;
     POINT mLastMousePos;
 };
 
@@ -208,8 +204,10 @@ bool TreeBillboardsApp::Initialize()
 	// so we have to query this information.
     mCbvSrvDescriptorSize = md3dDevice->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
 
-    mWaves = std::make_unique<Waves>(128, 128, 1.0f, 0.03f, 4.0f, 0.2f);
- 
+    mWaves = std::make_unique<Waves>(305, 150, 1.0f, 0.03f, 4.0f, 0.2f);
+	mCamera.SetPosition(-0.0f, 40.0f, -100.0f);
+
+
 	LoadTextures();
     BuildRootSignature();
 	BuildDescriptorHeaps();
@@ -225,6 +223,8 @@ bool TreeBillboardsApp::Initialize()
 	BuildPyramidGeometry();
 	BuildDiamondGeometry();
 	BuildPrismGeometry();
+
+	BuildGrassWallGeometry();
 
 
 	BuildTreeSpritesGeometry();
@@ -252,13 +252,13 @@ void TreeBillboardsApp::OnResize()
 
     // The window resized, so update the aspect ratio and recompute the projection matrix.
     XMMATRIX P = XMMatrixPerspectiveFovLH(0.25f*MathHelper::Pi, AspectRatio(), 1.0f, 1000.0f);
-    XMStoreFloat4x4(&mProj, P);
+	mCamera.SetLens(0.25f * MathHelper::Pi, AspectRatio(), 1.0f, 1000.0f);
 }
 
 void TreeBillboardsApp::Update(const GameTimer& gt)
 {
     OnKeyboardInput(gt);
-	UpdateCamera(gt);
+	//UpdateCamera(gt);
 
     // Cycle through the circular frame resource array.
     mCurrFrameResourceIndex = (mCurrFrameResourceIndex + 1) % gNumFrameResources;
@@ -372,24 +372,12 @@ void TreeBillboardsApp::OnMouseMove(WPARAM btnState, int x, int y)
         float dy = XMConvertToRadians(0.25f*static_cast<float>(y - mLastMousePos.y));
 
         // Update angles based on input to orbit camera around box.
-        mTheta += dx;
-        mPhi += dy;
+		mCamera.Pitch(dy);
+		mCamera.RotateY(dx);
 
         // Restrict the angle mPhi.
-        mPhi = MathHelper::Clamp(mPhi, 0.1f, MathHelper::Pi - 0.1f);
     }
-    else if((btnState & MK_RBUTTON) != 0)
-    {
-        // Make each pixel correspond to 0.2 unit in the scene.
-        float dx = 0.2f*static_cast<float>(x - mLastMousePos.x);
-        float dy = 0.2f*static_cast<float>(y - mLastMousePos.y);
 
-        // Update the camera radius based on input.
-        mRadius += dx - dy;
-
-        // Restrict the radius.
-        mRadius = MathHelper::Clamp(mRadius, 5.0f, 150.0f);
-    }
 
     mLastMousePos.x = x;
     mLastMousePos.y = y;
@@ -397,24 +385,26 @@ void TreeBillboardsApp::OnMouseMove(WPARAM btnState, int x, int y)
  
 void TreeBillboardsApp::OnKeyboardInput(const GameTimer& gt)
 {
+	//step3: we handle keyboard input to move the camera:
+
+	const float dt = gt.DeltaTime();
+
+	//GetAsyncKeyState returns a short (2 bytes)
+	if (GetAsyncKeyState('W') & 0x8000) //most significant bit (MSB) is 1 when key is pressed (1000 000 000 000)
+		mCamera.Walk(20.0f * dt);
+
+	if (GetAsyncKeyState('S') & 0x8000)
+		mCamera.Walk(-20.0f * dt);
+
+	if (GetAsyncKeyState('A') & 0x8000)
+		mCamera.Strafe(-20.0f * dt);
+
+	if (GetAsyncKeyState('D') & 0x8000)
+		mCamera.Strafe(20.0f * dt);
+
+	mCamera.UpdateViewMatrix();
 }
  
-void TreeBillboardsApp::UpdateCamera(const GameTimer& gt)
-{
-	// Convert Spherical to Cartesian coordinates.
-	mEyePos.x = mRadius*sinf(mPhi)*cosf(mTheta);
-	mEyePos.z = mRadius*sinf(mPhi)*sinf(mTheta);
-	mEyePos.y = mRadius*cosf(mPhi);
-
-	// Build the view matrix.
-	XMVECTOR pos = XMVectorSet(mEyePos.x, mEyePos.y, mEyePos.z, 1.0f);
-	XMVECTOR target = XMVectorZero();
-	XMVECTOR up = XMVectorSet(0.0f, 1.0f, 0.0f, 0.0f);
-
-	XMMATRIX view = XMMatrixLookAtLH(pos, target, up);
-	XMStoreFloat4x4(&mView, view);
-}
-
 void TreeBillboardsApp::AnimateMaterials(const GameTimer& gt)
 {
 	// Scroll the water material texture coordinates.
@@ -491,8 +481,8 @@ void TreeBillboardsApp::UpdateMaterialCBs(const GameTimer& gt)
 
 void TreeBillboardsApp::UpdateMainPassCB(const GameTimer& gt)
 {
-	XMMATRIX view = XMLoadFloat4x4(&mView);
-	XMMATRIX proj = XMLoadFloat4x4(&mProj);
+	XMMATRIX view = mCamera.GetView();
+	XMMATRIX proj = mCamera.GetProj();
 
 	XMMATRIX viewProj = XMMatrixMultiply(view, proj);
 	XMMATRIX invView = XMMatrixInverse(&XMMatrixDeterminant(view), view);
@@ -505,7 +495,8 @@ void TreeBillboardsApp::UpdateMainPassCB(const GameTimer& gt)
 	XMStoreFloat4x4(&mMainPassCB.InvProj, XMMatrixTranspose(invProj));
 	XMStoreFloat4x4(&mMainPassCB.ViewProj, XMMatrixTranspose(viewProj));
 	XMStoreFloat4x4(&mMainPassCB.InvViewProj, XMMatrixTranspose(invViewProj));
-	mMainPassCB.EyePosW = mEyePos;
+	mMainPassCB.EyePosW = mCamera.GetPosition3f();
+
 	mMainPassCB.RenderTargetSize = XMFLOAT2((float)mClientWidth, (float)mClientHeight);
 	mMainPassCB.InvRenderTargetSize = XMFLOAT2(1.0f / mClientWidth, 1.0f / mClientHeight);
 	mMainPassCB.NearZ = 1.0f;
@@ -515,7 +506,7 @@ void TreeBillboardsApp::UpdateMainPassCB(const GameTimer& gt)
 	mMainPassCB.AmbientLight = { 0.97f, 0.98f, 0.06f, 1.0f };
 
 	mMainPassCB.Lights[0].Direction = { 0.57735f, -0.57735f, 0.57735f };
-	mMainPassCB.Lights[0].Strength = { 1.0f, 1.0f, 1.0f };
+	mMainPassCB.Lights[0].Strength = { 1.0f, 0.0f, 0.0f };
 	mMainPassCB.Lights[0].Position = { 24.0f, 33.0f, -40.5f };
 
 
@@ -575,6 +566,14 @@ void TreeBillboardsApp::LoadTextures()
 	ThrowIfFailed(DirectX::CreateDDSTextureFromFile12(md3dDevice.Get(),
 		mCommandList.Get(), grassTex->Filename.c_str(),
 		grassTex->Resource, grassTex->UploadHeap));
+
+	auto grasswallTex = std::make_unique<Texture>();
+	grasswallTex->Name = "grasswallTex";
+	grasswallTex->Filename = L"../../Textures/grasswall.dds";
+	ThrowIfFailed(DirectX::CreateDDSTextureFromFile12(md3dDevice.Get(),
+		mCommandList.Get(), grasswallTex->Filename.c_str(),
+		grasswallTex->Resource, grasswallTex->UploadHeap));
+
 
 	auto waterTex = std::make_unique<Texture>();
 	waterTex->Name = "waterTex";
@@ -648,6 +647,8 @@ void TreeBillboardsApp::LoadTextures()
 		treeArrayTex->Resource, treeArrayTex->UploadHeap));
 
 	mTextures[grassTex->Name] = std::move(grassTex);
+	mTextures[grasswallTex->Name] = std::move(grasswallTex);
+
 	mTextures[waterTex->Name] = std::move(waterTex);
 	mTextures[bricksTex->Name] = std::move(bricksTex);
 	mTextures[WedgeTex->Name] = std::move(WedgeTex);
@@ -719,6 +720,8 @@ void TreeBillboardsApp::BuildDescriptorHeaps()
 	CD3DX12_CPU_DESCRIPTOR_HANDLE hDescriptor(mSrvDescriptorHeap->GetCPUDescriptorHandleForHeapStart());
 
 	auto grassTex = mTextures["grassTex"]->Resource;
+	auto grasswallTex = mTextures["grasswallTex"]->Resource;
+
 	auto waterTex = mTextures["waterTex"]->Resource;
 	auto bricksTex = mTextures["bricksTex"]->Resource;
 	auto bricks2Tex = mTextures["bricks2Tex"]->Resource;
@@ -739,7 +742,11 @@ void TreeBillboardsApp::BuildDescriptorHeaps()
 	srvDesc.Texture2D.MostDetailedMip = 0;
 	srvDesc.Texture2D.MipLevels = -1;
 	md3dDevice->CreateShaderResourceView(grassTex.Get(), &srvDesc, hDescriptor);
+	// next descriptor
+	hDescriptor.Offset(1, mCbvSrvDescriptorSize);
 
+	srvDesc.Format = grasswallTex->GetDesc().Format;
+	md3dDevice->CreateShaderResourceView(grasswallTex.Get(), &srvDesc, hDescriptor);
 	// next descriptor
 	hDescriptor.Offset(1, mCbvSrvDescriptorSize);
 
@@ -848,7 +855,7 @@ void TreeBillboardsApp::BuildShadersAndInputLayouts()
 void TreeBillboardsApp::BuildLandGeometry()
 {
     GeometryGenerator geoGen;
-    GeometryGenerator::MeshData grid = geoGen.CreateGrid(160.0f, 160.0f, 50, 50);
+    GeometryGenerator::MeshData grid = geoGen.CreateGrid(200.0f, 160.0f, 50, 50);
 
     //
     // Extract the vertex elements we are interested and apply the height function to
@@ -863,13 +870,16 @@ void TreeBillboardsApp::BuildLandGeometry()
 
         auto& p = grid.Vertices[i].Position;
 		vertices[i].Pos.x = -p.z;
-		vertices[i].Pos.z = p.x;
+		vertices[i].Pos.z = p.x - 55.f;
 
-		if (i > grid.Vertices.size()/16*5 +19  && i < grid.Vertices.size() / 16 *11 -16)
+
+		if (i > grid.Vertices.size()/16*3 +31  && i < grid.Vertices.size() / 16 *13 -28)
 		{
+
 			vertices[i].Pos.y = 0;
 		}
 		else
+
 			vertices[i].Pos.y= -8;
 
         vertices[i].Normal = GetHillsNormal(p.x, p.z);
@@ -1015,6 +1025,56 @@ void TreeBillboardsApp::BuildBoxGeometry()
 	geo->DrawArgs["box"] = submesh;
 
 	mGeometries["boxGeo"] = std::move(geo);
+}
+
+void TreeBillboardsApp::BuildGrassWallGeometry()
+{
+
+	GeometryGenerator geoGen;
+	GeometryGenerator::MeshData box = geoGen.CreateBox(1.0f, 1.5f, 1.0f, 3);
+
+	std::vector<Vertex> vertices(box.Vertices.size());
+	for (size_t i = 0; i < box.Vertices.size(); ++i)
+	{
+		auto& p = box.Vertices[i].Position;
+		vertices[i].Pos = p;
+		vertices[i].Normal = box.Vertices[i].Normal;
+		vertices[i].TexC = box.Vertices[i].TexC;
+	}
+
+	const UINT vbByteSize = (UINT)vertices.size() * sizeof(Vertex);
+
+	std::vector<std::uint16_t> indices = box.GetIndices16();
+	const UINT ibByteSize = (UINT)indices.size() * sizeof(std::uint16_t);
+
+	auto geo = std::make_unique<MeshGeometry>();
+	geo->Name = "grasswallGeo";
+
+	ThrowIfFailed(D3DCreateBlob(vbByteSize, &geo->VertexBufferCPU));
+	CopyMemory(geo->VertexBufferCPU->GetBufferPointer(), vertices.data(), vbByteSize);
+
+	ThrowIfFailed(D3DCreateBlob(ibByteSize, &geo->IndexBufferCPU));
+	CopyMemory(geo->IndexBufferCPU->GetBufferPointer(), indices.data(), ibByteSize);
+
+	geo->VertexBufferGPU = d3dUtil::CreateDefaultBuffer(md3dDevice.Get(),
+		mCommandList.Get(), vertices.data(), vbByteSize, geo->VertexBufferUploader);
+
+	geo->IndexBufferGPU = d3dUtil::CreateDefaultBuffer(md3dDevice.Get(),
+		mCommandList.Get(), indices.data(), ibByteSize, geo->IndexBufferUploader);
+
+	geo->VertexByteStride = sizeof(Vertex);
+	geo->VertexBufferByteSize = vbByteSize;
+	geo->IndexFormat = DXGI_FORMAT_R16_UINT;
+	geo->IndexBufferByteSize = ibByteSize;
+
+	SubmeshGeometry submesh;
+	submesh.IndexCount = (UINT)indices.size();
+	submesh.StartIndexLocation = 0;
+	submesh.BaseVertexLocation = 0;
+
+	geo->DrawArgs["grasswall"] = submesh;
+
+	mGeometries["grasswallGeo"] = std::move(geo);
 }
 
 void TreeBillboardsApp::BuildWedgeGeometry()
@@ -1325,8 +1385,8 @@ void TreeBillboardsApp::BuildTreeSpritesGeometry()
 		XMFLOAT3 Pos;
 		XMFLOAT2 Size;
 	};
-	static const int treeCount = 10;
-	std::array<TreeSpriteVertex, 16> vertices;
+	static const int treeCount = 24;
+	std::array<TreeSpriteVertex, treeCount> vertices;
 	for(UINT i = 0; i < treeCount; i++)
 	{
 		if(i<3)
@@ -1336,22 +1396,40 @@ void TreeBillboardsApp::BuildTreeSpritesGeometry()
 			vertices[i].Pos = XMFLOAT3(-15.0f, 8.0f, -10.0f - (i-3) * 10.0f);
 
 		}
-		else if (i >= 6 && i < 8)
+		else if (i >= 6 && i < 13)
 		{
-			vertices[i].Pos = XMFLOAT3(-15.0f +30.0f*(i-6), 8.0f, -50.0f);
+			if (i >= 11)
+			{
+				vertices[i].Pos = XMFLOAT3(-45.0f, 8.0f, -140.0f + ((i - 7) * 20));
+			}
+			else{
+				vertices[i].Pos = XMFLOAT3(-45.0f, 8.0f, -140.0f + ((i - 6) * 20));
+
+			}
 		}
-		else if (i >= 8 && i < 10)
+		else if (i >= 13 && i < 20)
 		{
-			vertices[i].Pos = XMFLOAT3(-15.0f + 30.0f * (i - 8), 8.0f, -60.0f);
+			vertices[i].Pos = XMFLOAT3(45.0f, 8.0f, -140.0f + ((i-13) * 20));
+		}
+
+		else if (i >= 20 && i <= 21)
+		{
+			vertices[i].Pos = XMFLOAT3(35.0f - ((i - 20) * 20), 8.0f, -150.0f );
+		}
+
+		else if (i >= 22 && i <= 23)
+		{
+			vertices[i].Pos = XMFLOAT3(-35.0f + ((i - 22) * 20), 8.0f, -150.0f);
 		}
 
 		vertices[i].Size = XMFLOAT2(20.0f, 20.0f);
 	}
 
-	std::array<std::uint16_t, 16> indices =
+	std::array<std::uint16_t, treeCount> indices =
 	{
 		0, 1, 2, 3, 4, 5, 6, 7, 
-		8, 9, 11, 12, 13, 14, 15
+		8, 9, 11, 12, 13, 14, 15,
+		16, 17, 18, 19, 20, 21, 22, 23
 	};
 
 	const UINT vbByteSize = (UINT)vertices.size() * sizeof(TreeSpriteVertex);
@@ -1558,6 +1636,14 @@ void TreeBillboardsApp::BuildMaterials()
 	grass->DiffuseAlbedo = XMFLOAT4(1.0f, 1.0f, 1.0f, 1.0f);
 	grass->FresnelR0 = XMFLOAT3(0.01f, 0.01f, 0.01f);
 	grass->Roughness = 0.125f;
+	
+	auto grasswall = std::make_unique<Material>();
+	grasswall->Name = "grass";
+	grasswall->MatCBIndex = MatCBIndex++;
+	grasswall->DiffuseSrvHeapIndex = DiffuseSrvHeapIndex++;
+	grasswall->DiffuseAlbedo = XMFLOAT4(1.0f, 1.0f, 1.0f, 1.0f);
+	grasswall->FresnelR0 = XMFLOAT3(0.01f, 0.01f, 0.01f);
+	grasswall->Roughness = 0.125f;
 
 	// This is not a good water material definition, but we do not have all the rendering
 	// tools we need (transparency, environment reflection), so we fake it for now.
@@ -1646,6 +1732,8 @@ void TreeBillboardsApp::BuildMaterials()
 
 
 	mMaterials["grass"] = std::move(grass);
+	mMaterials["grass2"] = std::move(grasswall);
+
 	mMaterials["water"] = std::move(water);
 	mMaterials["bricks"] = std::move(bricks);
 	mMaterials["bricks2"] = std::move(wedge);
@@ -1681,7 +1769,7 @@ void TreeBillboardsApp::BuildRenderItems()
 
     auto gridRitem = std::make_unique<RenderItem>();
     gridRitem->World = MathHelper::Identity4x4();
-	XMStoreFloat4x4(&gridRitem->TexTransform, XMMatrixScaling(5.0f, 5.0f, 1.0f));
+	XMStoreFloat4x4(&gridRitem->TexTransform, XMMatrixScaling(5.0f, 5.0f, 1.0f) );
 	gridRitem->ObjCBIndex = objCBIndex++;
 	gridRitem->Mat = mMaterials["grass"].get();
 	gridRitem->Geo = mGeometries["landGeo"].get();
@@ -1691,9 +1779,6 @@ void TreeBillboardsApp::BuildRenderItems()
     gridRitem->BaseVertexLocation = gridRitem->Geo->DrawArgs["grid"].BaseVertexLocation;
 
 	mRitemLayer[(int)RenderLayer::Opaque].push_back(gridRitem.get());
-
-
-
 
 
 	auto CenterRoom = std::make_unique<RenderItem>();
@@ -1943,43 +2028,6 @@ void TreeBillboardsApp::BuildRenderItems()
 
 	}
 
-	//stairs
-	auto middleStairs = std::make_unique<RenderItem>();
-	XMStoreFloat4x4(&middleStairs->World, XMMatrixTranslation(0.0f, 0.5f, -10.0f)* XMMatrixScaling(15.0f, 2.0f, 4.0f));
-	middleStairs->ObjCBIndex = objCBIndex++;
-	middleStairs->Mat = mMaterials["bricks"].get();
-	middleStairs->Geo = mGeometries["boxGeo"].get();
-	middleStairs->PrimitiveType = D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST;
-	middleStairs->IndexCount = middleStairs->Geo->DrawArgs["box"].IndexCount;
-	middleStairs->StartIndexLocation = middleStairs->Geo->DrawArgs["box"].StartIndexLocation;
-	middleStairs->BaseVertexLocation = middleStairs->Geo->DrawArgs["box"].BaseVertexLocation;
-	mRitemLayer[(int)RenderLayer::Opaque].push_back(middleStairs.get());
-	mAllRitems.push_back(std::move(middleStairs));
-
-	auto frontStairs = std::make_unique<RenderItem>();
-	XMStoreFloat4x4(&frontStairs->World, XMMatrixTranslation(0.0f, 0.5f, -11.0f)* XMMatrixScaling(15.0f, 2.0f, 4.0f));
-	frontStairs->ObjCBIndex = objCBIndex++;
-	frontStairs->Mat = mMaterials["bricks2"].get();
-	frontStairs->Geo = mGeometries["wedgeGeo"].get();
-	frontStairs->PrimitiveType = D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST;
-	frontStairs->IndexCount = frontStairs->Geo->DrawArgs["wedge"].IndexCount;
-	frontStairs->StartIndexLocation = frontStairs->Geo->DrawArgs["wedge"].StartIndexLocation;
-	frontStairs->BaseVertexLocation = frontStairs->Geo->DrawArgs["wedge"].BaseVertexLocation;
-	mRitemLayer[(int)RenderLayer::Opaque].push_back(frontStairs.get());
-	mAllRitems.push_back(std::move(frontStairs));
-
-	auto BackStairs = std::make_unique<RenderItem>();
-	XMStoreFloat4x4(&BackStairs->World, XMMatrixTranslation(0.0f, 0.5f, 9.0f)* XMMatrixScaling(15.0f, 2.0f, 4.0f) * XMMatrixRotationY(3.1416));
-	BackStairs->ObjCBIndex = objCBIndex++;
-	BackStairs->Mat = mMaterials["bricks2"].get();
-	BackStairs->Geo = mGeometries["wedgeGeo"].get();
-	BackStairs->PrimitiveType = D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST;
-	BackStairs->IndexCount = BackStairs->Geo->DrawArgs["wedge"].IndexCount;
-	BackStairs->StartIndexLocation = BackStairs->Geo->DrawArgs["wedge"].StartIndexLocation;
-	BackStairs->BaseVertexLocation = BackStairs->Geo->DrawArgs["wedge"].BaseVertexLocation;
-	mRitemLayer[(int)RenderLayer::Opaque].push_back(BackStairs.get());
-	mAllRitems.push_back(std::move(BackStairs));
-
 	//center Wedges
 
 	for (int j = 0; j <2; j ++)
@@ -2056,9 +2104,24 @@ void TreeBillboardsApp::BuildRenderItems()
 	mRitemLayer[(int)RenderLayer::Opaque].push_back(CenterPyramid.get());
 	mAllRitems.push_back(std::move(CenterPyramid));
 
+	//Gate
+	for (int i = 0; i < 2; i++)
+	{
+		float Additional;
+		float Additional2;
+
+		if (i == 1)
+		{
+			Additional = -10.0f;
+			Additional2 = -25.0f;
+		}
+		else {
+			Additional = 0.0f;
+			Additional2 = 0.0f;
+		}
 
 		auto GatePrism = std::make_unique<RenderItem>();
-		XMStoreFloat4x4(&GatePrism->World, XMMatrixTranslation(1.9f, 0.5f, -4.0f) * XMMatrixScaling(5.0f, 20.0f, 10.0f));
+		XMStoreFloat4x4(&GatePrism->World, XMMatrixTranslation(1.9f, 0.5f , -4.0f +Additional)* XMMatrixScaling(5.0f, 20.0f, 10.0f) );
 		GatePrism->ObjCBIndex = objCBIndex++;
 		GatePrism->Mat = mMaterials["checkboard"].get();
 		GatePrism->Geo = mGeometries["prismGeo"].get();
@@ -2070,7 +2133,7 @@ void TreeBillboardsApp::BuildRenderItems()
 		mAllRitems.push_back(std::move(GatePrism));
 
 		auto GatePrism2 = std::make_unique<RenderItem>();
-		XMStoreFloat4x4(&GatePrism2->World, XMMatrixTranslation(1.9f, 0.5f, 4.0f) * XMMatrixScaling(5.0f, 20.0f, 10.0f) * XMMatrixRotationY(3.1416));
+		XMStoreFloat4x4(&GatePrism2->World, XMMatrixTranslation(1.9f, 0.5f, 4.0f - Additional)* XMMatrixScaling(5.0f, 20.0f, 10.0f)* XMMatrixRotationY(3.1416));
 		GatePrism2->ObjCBIndex = objCBIndex++;
 		GatePrism2->Mat = mMaterials["checkboard"].get();
 		GatePrism2->Geo = mGeometries["prismGeo"].get();
@@ -2082,7 +2145,7 @@ void TreeBillboardsApp::BuildRenderItems()
 		mAllRitems.push_back(std::move(GatePrism2));
 
 		auto GatePrism3 = std::make_unique<RenderItem>();
-		XMStoreFloat4x4(&GatePrism3->World, XMMatrixTranslation(4.5, 0.0f, -4.0f) * XMMatrixScaling(5.0f, 30.0f, 10.0f) * XMMatrixRotationZ(3.1416/2 ));
+		XMStoreFloat4x4(&GatePrism3->World, XMMatrixTranslation(4.5, 0.0f, -4.0f + Additional)* XMMatrixScaling(5.0f, 30.0f, 10.0f)* XMMatrixRotationZ(3.1416 / 2));
 		GatePrism3->ObjCBIndex = objCBIndex++;
 		GatePrism3->Mat = mMaterials["checkboard"].get();
 		GatePrism3->Geo = mGeometries["prismGeo"].get();
@@ -2093,33 +2156,271 @@ void TreeBillboardsApp::BuildRenderItems()
 		mRitemLayer[(int)RenderLayer::Opaque].push_back(GatePrism3.get());
 		mAllRitems.push_back(std::move(GatePrism3));
 
-		// diamond
-		auto Diamond = std::make_unique<RenderItem>();
-		XMStoreFloat4x4(&Diamond->World, XMMatrixTranslation(0.0, 7.0f, 0.5f)* XMMatrixScaling(5.0f, 5.0f, 5.0f));
-		Diamond->ObjCBIndex = objCBIndex++;
-		Diamond->Mat = mMaterials["shiny"].get();
-		Diamond->Geo = mGeometries["diamondGeo"].get();
-		Diamond->PrimitiveType = D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST;
-		Diamond->IndexCount = Diamond->Geo->DrawArgs["diamond"].IndexCount;
-		Diamond->StartIndexLocation = Diamond->Geo->DrawArgs["diamond"].StartIndexLocation;
-		Diamond->BaseVertexLocation = Diamond->Geo->DrawArgs["diamond"].BaseVertexLocation;
-		mRitemLayer[(int)RenderLayer::Opaque].push_back(Diamond.get());
-		mAllRitems.push_back(std::move(Diamond));
+		auto middleStairs = std::make_unique<RenderItem>();
+		XMStoreFloat4x4(&middleStairs->World, XMMatrixTranslation(0.0f, 0.5f, -10.0f + Additional2)* XMMatrixScaling(15.0f, 2.0f, 4.0f));
+		middleStairs->ObjCBIndex = objCBIndex++;
+		middleStairs->Mat = mMaterials["bricks"].get();
+		middleStairs->Geo = mGeometries["boxGeo"].get();
+		middleStairs->PrimitiveType = D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST;
+		middleStairs->IndexCount = middleStairs->Geo->DrawArgs["box"].IndexCount;
+		middleStairs->StartIndexLocation = middleStairs->Geo->DrawArgs["box"].StartIndexLocation;
+		middleStairs->BaseVertexLocation = middleStairs->Geo->DrawArgs["box"].BaseVertexLocation;
+		mRitemLayer[(int)RenderLayer::Opaque].push_back(middleStairs.get());
+		mAllRitems.push_back(std::move(middleStairs));
 
-		auto treeSpritesRitem = std::make_unique<RenderItem>();
-		treeSpritesRitem->World = MathHelper::Identity4x4();
-		treeSpritesRitem->ObjCBIndex = objCBIndex++;
-		treeSpritesRitem->Mat = mMaterials["treeSprites"].get();
-		treeSpritesRitem->Geo = mGeometries["treeSpritesGeo"].get();
-		//step2
-		treeSpritesRitem->PrimitiveType = D3D_PRIMITIVE_TOPOLOGY_POINTLIST;
-		treeSpritesRitem->IndexCount = treeSpritesRitem->Geo->DrawArgs["points"].IndexCount;
-		treeSpritesRitem->StartIndexLocation = treeSpritesRitem->Geo->DrawArgs["points"].StartIndexLocation;
-		treeSpritesRitem->BaseVertexLocation = treeSpritesRitem->Geo->DrawArgs["points"].BaseVertexLocation;
+		auto frontStairs = std::make_unique<RenderItem>();
+		XMStoreFloat4x4(&frontStairs->World, XMMatrixTranslation(0.0f, 0.5f, -11.0f + Additional2)* XMMatrixScaling(15.0f, 2.0f, 4.0f));
+		frontStairs->ObjCBIndex = objCBIndex++;
+		frontStairs->Mat = mMaterials["bricks2"].get();
+		frontStairs->Geo = mGeometries["wedgeGeo"].get();
+		frontStairs->PrimitiveType = D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST;
+		frontStairs->IndexCount = frontStairs->Geo->DrawArgs["wedge"].IndexCount;
+		frontStairs->StartIndexLocation = frontStairs->Geo->DrawArgs["wedge"].StartIndexLocation;
+		frontStairs->BaseVertexLocation = frontStairs->Geo->DrawArgs["wedge"].BaseVertexLocation;
+		mRitemLayer[(int)RenderLayer::Opaque].push_back(frontStairs.get());
+		mAllRitems.push_back(std::move(frontStairs));
 
-		mRitemLayer[(int)RenderLayer::AlphaTestedTreeSprites].push_back(treeSpritesRitem.get());
+		auto BackStairs = std::make_unique<RenderItem>();
+		XMStoreFloat4x4(&BackStairs->World, XMMatrixTranslation(0.0f, 0.5f, 9.0f - Additional2)* XMMatrixScaling(15.0f, 2.0f, 4.0f)* XMMatrixRotationY(3.1416));
+		BackStairs->ObjCBIndex = objCBIndex++;
+		BackStairs->Mat = mMaterials["bricks2"].get();
+		BackStairs->Geo = mGeometries["wedgeGeo"].get();
+		BackStairs->PrimitiveType = D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST;
+		BackStairs->IndexCount = BackStairs->Geo->DrawArgs["wedge"].IndexCount;
+		BackStairs->StartIndexLocation = BackStairs->Geo->DrawArgs["wedge"].StartIndexLocation;
+		BackStairs->BaseVertexLocation = BackStairs->Geo->DrawArgs["wedge"].BaseVertexLocation;
+		mRitemLayer[(int)RenderLayer::Opaque].push_back(BackStairs.get());
+		mAllRitems.push_back(std::move(BackStairs));
 
-		mAllRitems.push_back(std::move(treeSpritesRitem));
+	}
+
+	//maze
+	auto Leftgrasswall = std::make_unique<RenderItem>();
+	XMStoreFloat4x4(&Leftgrasswall->World, XMMatrixTranslation(7.5f, 0.75f, 0.9f ) * XMMatrixScaling(5.0f, 12.0f, 100.0f) * XMMatrixRotationY(3.1416));
+	Leftgrasswall->ObjCBIndex = objCBIndex++;
+	Leftgrasswall->Mat = mMaterials["grass2"].get();
+	Leftgrasswall->Geo = mGeometries["grasswallGeo"].get();
+	Leftgrasswall->PrimitiveType = D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST;
+	Leftgrasswall->IndexCount = Leftgrasswall->Geo->DrawArgs["grasswall"].IndexCount;
+	Leftgrasswall->StartIndexLocation = Leftgrasswall->Geo->DrawArgs["grasswall"].StartIndexLocation;
+	Leftgrasswall->BaseVertexLocation = Leftgrasswall->Geo->DrawArgs["grasswall"].BaseVertexLocation;
+	mRitemLayer[(int)RenderLayer::Opaque].push_back(Leftgrasswall.get());
+	mAllRitems.push_back(std::move(Leftgrasswall));
+
+	auto Rigthgrasswall = std::make_unique<RenderItem>();
+	XMStoreFloat4x4(&Rigthgrasswall->World, XMMatrixTranslation(-7.5f, 0.75f, 0.9f)* XMMatrixScaling(5.0f, 12.0f, 100.0f)* XMMatrixRotationY(3.1416));
+	Rigthgrasswall->ObjCBIndex = objCBIndex++;
+	Rigthgrasswall->Mat = mMaterials["grass2"].get();
+	Rigthgrasswall->Geo = mGeometries["grasswallGeo"].get();
+	Rigthgrasswall->PrimitiveType = D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST;
+	Rigthgrasswall->IndexCount = Rigthgrasswall->Geo->DrawArgs["grasswall"].IndexCount;
+	Rigthgrasswall->StartIndexLocation = Rigthgrasswall->Geo->DrawArgs["grasswall"].StartIndexLocation;
+	Rigthgrasswall->BaseVertexLocation = Rigthgrasswall->Geo->DrawArgs["grasswall"].BaseVertexLocation;
+	mRitemLayer[(int)RenderLayer::Opaque].push_back(Rigthgrasswall.get());
+	mAllRitems.push_back(std::move(Rigthgrasswall));
+
+
+
+	auto LeftFrontgrasswall = std::make_unique<RenderItem>();
+	XMStoreFloat4x4(&LeftFrontgrasswall->World, XMMatrixTranslation(1.1f, 0.75f, -27.5f)* XMMatrixScaling(22.5f, 12.0f, 5.0f));
+	LeftFrontgrasswall->ObjCBIndex = objCBIndex++;
+	LeftFrontgrasswall->Mat = mMaterials["grass2"].get();
+	LeftFrontgrasswall->Geo = mGeometries["grasswallGeo"].get();
+	LeftFrontgrasswall->PrimitiveType = D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST;
+	LeftFrontgrasswall->IndexCount = LeftFrontgrasswall->Geo->DrawArgs["grasswall"].IndexCount;
+	LeftFrontgrasswall->StartIndexLocation = LeftFrontgrasswall->Geo->DrawArgs["grasswall"].StartIndexLocation;
+	LeftFrontgrasswall->BaseVertexLocation = LeftFrontgrasswall->Geo->DrawArgs["grasswall"].BaseVertexLocation;
+	mRitemLayer[(int)RenderLayer::Opaque].push_back(LeftFrontgrasswall.get());
+	mAllRitems.push_back(std::move(LeftFrontgrasswall));
+
+	auto RightFrontgrasswall = std::make_unique<RenderItem>();
+	XMStoreFloat4x4(&RightFrontgrasswall->World, XMMatrixTranslation(-1.1f, 0.75f, -27.5f)* XMMatrixScaling(22.5f, 12.0f, 5.0f));
+	RightFrontgrasswall->ObjCBIndex = objCBIndex++;
+	RightFrontgrasswall->Mat = mMaterials["grass2"].get();
+	RightFrontgrasswall->Geo = mGeometries["grasswallGeo"].get();
+	RightFrontgrasswall->PrimitiveType = D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST;
+	RightFrontgrasswall->IndexCount = RightFrontgrasswall->Geo->DrawArgs["grasswall"].IndexCount;
+	RightFrontgrasswall->StartIndexLocation = RightFrontgrasswall->Geo->DrawArgs["grasswall"].StartIndexLocation;
+	RightFrontgrasswall->BaseVertexLocation = RightFrontgrasswall->Geo->DrawArgs["grasswall"].BaseVertexLocation;
+	mRitemLayer[(int)RenderLayer::Opaque].push_back(RightFrontgrasswall.get());
+	mAllRitems.push_back(std::move(RightFrontgrasswall));
+
+	auto LeftBackgrasswall = std::make_unique<RenderItem>();
+	XMStoreFloat4x4(&LeftBackgrasswall->World, XMMatrixTranslation(4.15f, 0.75f, -8.5f)* XMMatrixScaling(7.5f, 12.0f, 5.0f));
+	LeftBackgrasswall->ObjCBIndex = objCBIndex++;
+	LeftBackgrasswall->Mat = mMaterials["grass2"].get();
+	LeftBackgrasswall->Geo = mGeometries["grasswallGeo"].get();
+	LeftBackgrasswall->PrimitiveType = D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST;
+	LeftBackgrasswall->IndexCount = LeftBackgrasswall->Geo->DrawArgs["grasswall"].IndexCount;
+	LeftBackgrasswall->StartIndexLocation = LeftBackgrasswall->Geo->DrawArgs["grasswall"].StartIndexLocation;
+	LeftBackgrasswall->BaseVertexLocation = LeftBackgrasswall->Geo->DrawArgs["grasswall"].BaseVertexLocation;
+	mRitemLayer[(int)RenderLayer::Opaque].push_back(LeftBackgrasswall.get());
+	mAllRitems.push_back(std::move(LeftBackgrasswall));
+
+	auto RidghtBackgrasswall = std::make_unique<RenderItem>();
+	XMStoreFloat4x4(&RidghtBackgrasswall->World, XMMatrixTranslation(-4.15f, 0.75f, -8.5f)* XMMatrixScaling(7.5f, 12.0f, 5.0f));
+	RidghtBackgrasswall->ObjCBIndex = objCBIndex++;
+	RidghtBackgrasswall->Mat = mMaterials["grass2"].get();
+	RidghtBackgrasswall->Geo = mGeometries["grasswallGeo"].get();
+	RidghtBackgrasswall->PrimitiveType = D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST;
+	RidghtBackgrasswall->IndexCount = RidghtBackgrasswall->Geo->DrawArgs["grasswall"].IndexCount;
+	RidghtBackgrasswall->StartIndexLocation = RidghtBackgrasswall->Geo->DrawArgs["grasswall"].StartIndexLocation;
+	RidghtBackgrasswall->BaseVertexLocation = RidghtBackgrasswall->Geo->DrawArgs["grasswall"].BaseVertexLocation;
+	mRitemLayer[(int)RenderLayer::Opaque].push_back(RidghtBackgrasswall.get());
+	mAllRitems.push_back(std::move(RidghtBackgrasswall));
+
+
+
+	//Laberinth
+	auto MazeWall = std::make_unique<RenderItem>();
+	XMStoreFloat4x4(&MazeWall->World, XMMatrixTranslation(0.275f, 0.75f, -24.0f)* XMMatrixScaling(45.0f, 10.0f, 5.0f));
+	MazeWall->ObjCBIndex = objCBIndex++;
+	MazeWall->Mat = mMaterials["grass2"].get();
+	MazeWall->Geo = mGeometries["grasswallGeo"].get();
+	MazeWall->PrimitiveType = D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST;
+	MazeWall->IndexCount = MazeWall->Geo->DrawArgs["grasswall"].IndexCount;
+	MazeWall->StartIndexLocation = MazeWall->Geo->DrawArgs["grasswall"].StartIndexLocation;
+	MazeWall->BaseVertexLocation = MazeWall->Geo->DrawArgs["grasswall"].BaseVertexLocation;
+	mRitemLayer[(int)RenderLayer::Opaque].push_back(MazeWall.get());
+	mAllRitems.push_back(std::move(MazeWall));
+
+	auto Maze2 = std::make_unique<RenderItem>();
+	XMStoreFloat4x4(&Maze2->World, XMMatrixTranslation(-0.0f, 0.75f, -11.5f)* XMMatrixScaling(55.0f, 10.0f, 5.0f));
+	Maze2->ObjCBIndex = objCBIndex++;
+	Maze2->Mat = mMaterials["grass2"].get();
+	Maze2->Geo = mGeometries["grasswallGeo"].get();
+	Maze2->PrimitiveType = D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST;
+	Maze2->IndexCount = Maze2->Geo->DrawArgs["grasswall"].IndexCount;
+	Maze2->StartIndexLocation = Maze2->Geo->DrawArgs["grasswall"].StartIndexLocation;
+	Maze2->BaseVertexLocation = Maze2->Geo->DrawArgs["grasswall"].BaseVertexLocation;
+	mRitemLayer[(int)RenderLayer::Opaque].push_back(Maze2.get());
+	mAllRitems.push_back(std::move(Maze2));
+
+	auto Maze2_1 = std::make_unique<RenderItem>();
+	XMStoreFloat4x4(&Maze2_1->World, XMMatrixTranslation(5.0f, 0.75f, -5.0f)* XMMatrixScaling(5.0f, 10.0f, 10.0f));
+	Maze2_1->ObjCBIndex = objCBIndex++;
+	Maze2_1->Mat = mMaterials["grass2"].get();
+	Maze2_1->Geo = mGeometries["grasswallGeo"].get();
+	Maze2_1->PrimitiveType = D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST;
+	Maze2_1->IndexCount = Maze2_1->Geo->DrawArgs["grasswall"].IndexCount;
+	Maze2_1->StartIndexLocation = Maze2_1->Geo->DrawArgs["grasswall"].StartIndexLocation;
+	Maze2_1->BaseVertexLocation = Maze2_1->Geo->DrawArgs["grasswall"].BaseVertexLocation;
+	mRitemLayer[(int)RenderLayer::Opaque].push_back(Maze2_1.get());
+	mAllRitems.push_back(std::move(Maze2_1));
+
+	auto Maze2_2 = std::make_unique<RenderItem>();
+	XMStoreFloat4x4(&Maze2_2->World, XMMatrixTranslation(-4.5f, 0.75f, -8.0f)* XMMatrixScaling(5.0f, 10.0f, 10.0f));
+	Maze2_2->ObjCBIndex = objCBIndex++;
+	Maze2_2->Mat = mMaterials["grass2"].get();
+	Maze2_2->Geo = mGeometries["grasswallGeo"].get();
+	Maze2_2->PrimitiveType = D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST;
+	Maze2_2->IndexCount = Maze2_2->Geo->DrawArgs["grasswall"].IndexCount;
+	Maze2_2->StartIndexLocation = Maze2_2->Geo->DrawArgs["grasswall"].StartIndexLocation;
+	Maze2_2->BaseVertexLocation = Maze2_2->Geo->DrawArgs["grasswall"].BaseVertexLocation;
+	mRitemLayer[(int)RenderLayer::Opaque].push_back(Maze2_2.get());
+	mAllRitems.push_back(std::move(Maze2_2));
+
+	auto Maze2_5 = std::make_unique<RenderItem>();
+	XMStoreFloat4x4(&Maze2_5->World, XMMatrixTranslation(-0.2f, 0.8f, -14.5f)* XMMatrixScaling(50.0f, 10.0f, 5.0f));
+	Maze2_5->ObjCBIndex = objCBIndex++;
+	Maze2_5->Mat = mMaterials["grass2"].get();
+	Maze2_5->Geo = mGeometries["grasswallGeo"].get();
+	Maze2_5->PrimitiveType = D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST;
+	Maze2_5->IndexCount = Maze2_5->Geo->DrawArgs["grasswall"].IndexCount;
+	Maze2_5->StartIndexLocation = Maze2_5->Geo->DrawArgs["grasswall"].StartIndexLocation;
+	Maze2_5->BaseVertexLocation = Maze2_5->Geo->DrawArgs["grasswall"].BaseVertexLocation;
+	mRitemLayer[(int)RenderLayer::Opaque].push_back(Maze2_5.get());
+	mAllRitems.push_back(std::move(Maze2_5));
+
+	auto Maze3 = std::make_unique<RenderItem>();
+	XMStoreFloat4x4(&Maze3->World, XMMatrixTranslation(-0.0f, 0.75f, -17.5f)* XMMatrixScaling(50.0f, 10.0f, 5.0f));
+	Maze3->ObjCBIndex = objCBIndex++;
+	Maze3->Mat = mMaterials["grass2"].get();
+	Maze3->Geo = mGeometries["grasswallGeo"].get();
+	Maze3->PrimitiveType = D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST;
+	Maze3->IndexCount = Maze3->Geo->DrawArgs["grasswall"].IndexCount;
+	Maze3->StartIndexLocation = Maze3->Geo->DrawArgs["grasswall"].StartIndexLocation;
+	Maze3->BaseVertexLocation = Maze3->Geo->DrawArgs["grasswall"].BaseVertexLocation;
+	mRitemLayer[(int)RenderLayer::Opaque].push_back(Maze3.get());
+	mAllRitems.push_back(std::move(Maze3));
+
+	auto Maze4 = std::make_unique<RenderItem>();
+	XMStoreFloat4x4(&Maze4->World, XMMatrixTranslation(-4.5f, 0.75f, -3.25f)* XMMatrixScaling(5.0f, 10.0f, 32.5f));
+	Maze4->ObjCBIndex = objCBIndex++;
+	Maze4->Mat = mMaterials["grass2"].get();
+	Maze4->Geo = mGeometries["grasswallGeo"].get();
+	Maze4->PrimitiveType = D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST;
+	Maze4->IndexCount = Maze4->Geo->DrawArgs["grasswall"].IndexCount;
+	Maze4->StartIndexLocation = Maze4->Geo->DrawArgs["grasswall"].StartIndexLocation;
+	Maze4->BaseVertexLocation = Maze4->Geo->DrawArgs["grasswall"].BaseVertexLocation;
+	mRitemLayer[(int)RenderLayer::Opaque].push_back(Maze4.get());
+	mAllRitems.push_back(std::move(Maze4));
+
+	auto Maze5 = std::make_unique<RenderItem>();
+	XMStoreFloat4x4(&Maze5->World, XMMatrixTranslation(4.5f, 0.75f, -6.0f)* XMMatrixScaling(5.0f, 10.0f, 16.25f));
+	Maze5->ObjCBIndex = objCBIndex++;
+	Maze5->Mat = mMaterials["grass2"].get();
+	Maze5->Geo = mGeometries["grasswallGeo"].get();
+	Maze5->PrimitiveType = D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST;
+	Maze5->IndexCount = Maze5->Geo->DrawArgs["grasswall"].IndexCount;
+	Maze5->StartIndexLocation = Maze5->Geo->DrawArgs["grasswall"].StartIndexLocation;
+	Maze5->BaseVertexLocation = Maze5->Geo->DrawArgs["grasswall"].BaseVertexLocation;
+	mRitemLayer[(int)RenderLayer::Opaque].push_back(Maze5.get());
+	mAllRitems.push_back(std::move(Maze5));
+
+	auto Maze6 = std::make_unique<RenderItem>();
+	XMStoreFloat4x4(&Maze6->World, XMMatrixTranslation(0.3f, 0.75f, -20.5f)* XMMatrixScaling(25.0f, 10.0f, 5.0f));
+	Maze6->ObjCBIndex = objCBIndex++;
+	Maze6->Mat = mMaterials["grass2"].get();
+	Maze6->Geo = mGeometries["grasswallGeo"].get();
+	Maze6->PrimitiveType = D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST;
+	Maze6->IndexCount = Maze6->Geo->DrawArgs["grasswall"].IndexCount;
+	Maze6->StartIndexLocation = Maze6->Geo->DrawArgs["grasswall"].StartIndexLocation;
+	Maze6->BaseVertexLocation = Maze6->Geo->DrawArgs["grasswall"].BaseVertexLocation;
+	mRitemLayer[(int)RenderLayer::Opaque].push_back(Maze6.get());
+	mAllRitems.push_back(std::move(Maze6));
+
+	auto Maze7 = std::make_unique<RenderItem>();
+	XMStoreFloat4x4(&Maze7->World, XMMatrixTranslation(3.0f, 0.75f, -14.5f)* XMMatrixScaling(10.0f, 10.0f, 5.0f));
+	Maze7->ObjCBIndex = objCBIndex++;
+	Maze7->Mat = mMaterials["grass2"].get();
+	Maze7->Geo = mGeometries["grasswallGeo"].get();
+	Maze7->PrimitiveType = D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST;
+	Maze7->IndexCount = Maze7->Geo->DrawArgs["grasswall"].IndexCount;
+	Maze7->StartIndexLocation = Maze7->Geo->DrawArgs["grasswall"].StartIndexLocation;
+	Maze7->BaseVertexLocation = Maze7->Geo->DrawArgs["grasswall"].BaseVertexLocation;
+	mRitemLayer[(int)RenderLayer::Opaque].push_back(Maze7.get());
+	mAllRitems.push_back(std::move(Maze7));
+
+	// diamond
+	auto Diamond = std::make_unique<RenderItem>();
+	XMStoreFloat4x4(&Diamond->World, XMMatrixTranslation(0.0, 7.0f, 0.5f)* XMMatrixScaling(5.0f, 5.0f, 5.0f));
+	Diamond->ObjCBIndex = objCBIndex++;
+	Diamond->Mat = mMaterials["shiny"].get();
+	Diamond->Geo = mGeometries["diamondGeo"].get();
+	Diamond->PrimitiveType = D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST;
+	Diamond->IndexCount = Diamond->Geo->DrawArgs["diamond"].IndexCount;
+	Diamond->StartIndexLocation = Diamond->Geo->DrawArgs["diamond"].StartIndexLocation;
+	Diamond->BaseVertexLocation = Diamond->Geo->DrawArgs["diamond"].BaseVertexLocation;
+	mRitemLayer[(int)RenderLayer::Opaque].push_back(Diamond.get());
+	mAllRitems.push_back(std::move(Diamond));
+
+
+
+	auto treeSpritesRitem = std::make_unique<RenderItem>();
+	treeSpritesRitem->World = MathHelper::Identity4x4();
+	treeSpritesRitem->ObjCBIndex = objCBIndex++;
+	treeSpritesRitem->Mat = mMaterials["treeSprites"].get();
+	treeSpritesRitem->Geo = mGeometries["treeSpritesGeo"].get();
+	//step2
+	treeSpritesRitem->PrimitiveType = D3D_PRIMITIVE_TOPOLOGY_POINTLIST;
+	treeSpritesRitem->IndexCount = treeSpritesRitem->Geo->DrawArgs["points"].IndexCount;
+	treeSpritesRitem->StartIndexLocation = treeSpritesRitem->Geo->DrawArgs["points"].StartIndexLocation;
+	treeSpritesRitem->BaseVertexLocation = treeSpritesRitem->Geo->DrawArgs["points"].BaseVertexLocation;
+	mRitemLayer[(int)RenderLayer::AlphaTestedTreeSprites].push_back(treeSpritesRitem.get());
+
+	mAllRitems.push_back(std::move(treeSpritesRitem));
+
 
 
 

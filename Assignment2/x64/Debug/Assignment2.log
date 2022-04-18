@@ -1,0 +1,17 @@
+﻿  Week7-2-TreeBillboardsApp.cpp
+C:\DirectX-master\Assignment3\Assignment2\Week7-2-TreeBillboardsApp.cpp(1866,148): warning C4305: 'argument': truncation from 'double' to 'float'
+C:\DirectX-master\Assignment3\Assignment2\Week7-2-TreeBillboardsApp.cpp(1898,151): warning C4305: 'argument': truncation from 'double' to 'float'
+C:\DirectX-master\Assignment3\Assignment2\Week7-2-TreeBillboardsApp.cpp(1899,149): warning C4305: 'argument': truncation from 'double' to 'float'
+C:\DirectX-master\Assignment3\Assignment2\Week7-2-TreeBillboardsApp.cpp(1929,152): warning C4305: 'argument': truncation from 'double' to 'float'
+C:\DirectX-master\Assignment3\Assignment2\Week7-2-TreeBillboardsApp.cpp(1930,149): warning C4305: 'argument': truncation from 'double' to 'float'
+C:\DirectX-master\Assignment3\Assignment2\Week7-2-TreeBillboardsApp.cpp(1959,151): warning C4305: 'argument': truncation from 'double' to 'float'
+C:\DirectX-master\Assignment3\Assignment2\Week7-2-TreeBillboardsApp.cpp(1960,150): warning C4305: 'argument': truncation from 'double' to 'float'
+C:\DirectX-master\Assignment3\Assignment2\Week7-2-TreeBillboardsApp.cpp(2038,158): warning C4305: 'argument': truncation from 'double' to 'float'
+C:\DirectX-master\Assignment3\Assignment2\Week7-2-TreeBillboardsApp.cpp(2039,156): warning C4305: 'argument': truncation from 'double' to 'float'
+C:\DirectX-master\Assignment3\Assignment2\Week7-2-TreeBillboardsApp.cpp(2070,159): warning C4305: 'argument': truncation from 'double' to 'float'
+C:\DirectX-master\Assignment3\Assignment2\Week7-2-TreeBillboardsApp.cpp(2136,152): warning C4305: 'argument': truncation from 'double' to 'float'
+C:\DirectX-master\Assignment3\Assignment2\Week7-2-TreeBillboardsApp.cpp(2148,156): warning C4305: 'argument': truncation from 'double' to 'float'
+C:\DirectX-master\Assignment3\Assignment2\Week7-2-TreeBillboardsApp.cpp(2184,152): warning C4305: 'argument': truncation from 'double' to 'float'
+C:\DirectX-master\Assignment3\Assignment2\Week7-2-TreeBillboardsApp.cpp(2199,146): warning C4305: 'argument': truncation from 'double' to 'float'
+C:\DirectX-master\Assignment3\Assignment2\Week7-2-TreeBillboardsApp.cpp(2211,145): warning C4305: 'argument': truncation from 'double' to 'float'
+  Assignment2.vcxproj -> C:\DirectX-master\Assignment3\x64\Debug\Assignment2.exe

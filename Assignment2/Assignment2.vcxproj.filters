@@ -46,7 +46,7 @@
       <Filter>Resource Files</Filter>
     </ClCompile>
     <ClCompile Include="Week7-2-TreeBillboardsApp.cpp">
-      <Filter>Resource Files</Filter>
+      <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
@@ -92,6 +92,9 @@
       <Filter>Shaders</Filter>
     </FxCompile>
     <FxCompile Include="Shaders\TreeSprite.hlsl">
+      <Filter>Shaders</Filter>
+    </FxCompile>
+    <FxCompile Include="Shaders\Default_Indexing.hlsl">
       <Filter>Shaders</Filter>
     </FxCompile>
   </ItemGroup>
